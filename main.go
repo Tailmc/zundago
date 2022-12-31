@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
 	"errors"
@@ -39,7 +40,9 @@ const (
 )
 
 var (
-	rgx      = regexp.MustCompile(`<?(a)?:?(\w{2,32}):(\d{17,19})>?|(?:https?|ftp):\/\/[\n\S]+`)
+	emojis   = regexp.MustCompile(`<?(a)?:?(\w{2,32}):(\d{17,19})>?`)
+	links    = regexp.MustCompile(`(?:https?|ftp):\/\/[\n\S]+`)
+	channels = regexp.MustCompile(`<#[^>]*>`)
 	def      = new(sync.Map)
 	vcs      = new(sync.Map)
 	resolver = dns.New()
@@ -275,6 +278,33 @@ func main() {
 					}
 					interaction.Edit(resp)
 
+					time.Sleep(time.Second)
+
+					opn, err = os.Open("greet.dca")
+					if err != nil {
+						return
+					}
+					defer opn.Close()
+
+					voice.Speak(true)
+					defer voice.Speak(false)
+
+					var ln int16
+					for {
+						err := binary.Read(opn, binary.LittleEndian, &ln)
+						if err != nil {
+							return
+						}
+
+						buf := make([]byte, ln)
+						err = binary.Read(opn, binary.LittleEndian, &buf)
+						if err != nil {
+							return
+						}
+
+						voice.Send <- buf
+					}
+
 				case "leave":
 
 					err := interaction.Defer(false)
@@ -304,20 +334,6 @@ func main() {
 						return
 					}
 
-					crt, err := os.Create(filepath.Join("dict", interaction.GuildId+".dict"))
-					if err == nil {
-						defer crt.Close()
-						err := gob.NewEncoder(crt).Encode(vc.dict)
-						if err != nil {
-							resp := &discord.Response{
-								Content: ":red_circle: 失敗...",
-								Embeds:  []discord.Embed{{Description: "辞書の保存に失敗したのだ", Color: green}},
-							}
-							interaction.Edit(resp)
-							return
-						}
-					}
-
 					vcs.Delete(interaction.GuildId)
 
 					resp := &discord.Response{
@@ -325,6 +341,15 @@ func main() {
 						Embeds:  []discord.Embed{{Description: "ボイスチャンネルから切断したのだ", Color: green}},
 					}
 					interaction.Edit(resp)
+
+					if len(vc.dict) == 0 {
+						return
+					}
+
+					if crt, _ := os.Create(filepath.Join("dict", vc.voice.GuildId+".dict")); crt != nil {
+						defer crt.Close()
+						gob.NewEncoder(crt).Encode(vc.dict)
+					}
 
 				case "dict":
 
@@ -507,27 +532,26 @@ func main() {
 				return
 			}
 
-			if len(con) >= 60 {
+			if len([]rune(con)) >= 60 {
 				con = string([]rune(con[:60])) + " 以下略"
 			}
+			con += " "
+
 			words := []string{"\n", " "}
 
 			for _, mention := range msg.Mentions {
-				words = append(words, "<@"+mention.Id+">", "@"+mention.Username, "<@!"+mention.Id+">", "@"+mention.Username)
-			}
-
-			for _, mention := range msg.ChannelMentions {
-				words = append(words, "<#"+mention.Id+">", "#"+mention.Name)
+				words = append(words, "<@"+mention.Id+">", mention.Username, "<@!"+mention.Id+">", mention.Username)
 			}
 
 			if guild, ok := discord.Global.Guilds[msg.GuildId]; ok {
 				for _, mention := range msg.RoleMentions {
 					for _, role := range guild.Roles {
-						if role.Id == mention {
-							words = append(words, "<@&"+role.Id+">", "@"+role.Name)
+						if role.Id == mention && role.Mentionable {
+							words = append(words, "<@&"+role.Id+">", role.Name)
 							break
 						}
 					}
+					words = append(words, "<@&"+mention+">", "メンション省略")
 				}
 			}
 
@@ -549,7 +573,14 @@ func main() {
 			con = strings.NewReplacer(vc.dict...).Replace(con)
 			con = strings.NewReplacer(words...).Replace(con)
 
-			con = rgx.ReplaceAllString(con, "")
+			con = emojis.ReplaceAllString(con, "")
+			con = links.ReplaceAllString(con, "")
+			con = channels.ReplaceAllStringFunc(con, func(mention string) string {
+				if channel, ok := discord.Global.Channels[mention[2:len(mention)-1]]; ok {
+					return channel.Name
+				}
+				return "メンション省略"
+			})
 
 			if len(con) == 0 {
 				return
@@ -582,6 +613,7 @@ func main() {
 			}
 
 			defer get.Body.Close()
+			defer io.Copy(io.Discard, get.Body)
 			if get.StatusCode != http.StatusOK {
 				return
 			}
@@ -614,7 +646,7 @@ func main() {
 
 		VoiceStateUpdate: func(bot *discord.Bot, voiceStates []discord.VoiceState) {
 
-			if len(voiceStates) < 1 {
+			if len(voiceStates) == 0 {
 				return
 			}
 
@@ -626,7 +658,7 @@ func main() {
 			vc := any.(*vc)
 
 			for _, state := range voiceStates {
-				if bot.Id != state.UserID || vc.voice.ChannelId != state.ChannelID || state.Member.User.Bot {
+				if vc.voice.ChannelId != state.ChannelID || state.Member.User.Bot {
 					continue
 				}
 				ok = false
@@ -638,7 +670,17 @@ func main() {
 				if err != nil {
 					return
 				}
+
 				vcs.Delete(vc.voice.GuildId)
+
+				if len(vc.dict) == 0 {
+					return
+				}
+
+				if crt, _ := os.Create(filepath.Join("dict", vc.voice.GuildId+".dict")); crt != nil {
+					defer crt.Close()
+					gob.NewEncoder(crt).Encode(vc.dict)
+				}
 			}
 		},
 	}

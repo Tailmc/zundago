@@ -49,19 +49,6 @@ const (
 	Unknown = 255
 )
 
-var (
-	handshake = map[string]bool{
-		"Host":                   true,
-		"Upgrade":                true,
-		"Connection":             true,
-		"Sec-Websocket-Key":      true,
-		"Sec-Websocket-Origin":   true,
-		"Sec-Websocket-Version":  true,
-		"Sec-Websocket-Protocol": true,
-		"Sec-Websocket-Accept":   true,
-	}
-)
-
 func dial(uri *url.URL) (net.Conn, error) {
 	if uri.Scheme == "ws" {
 		return dns.Dialer.Dial("tcp", net.JoinHostPort(uri.Hostname(), "80"))
@@ -115,9 +102,6 @@ func Dial(raw string) (*Conn, error) {
 			return nil, err
 		}
 	}
-
-	head := make(http.Header)
-	head.WriteSubset(conn.writer, handshake)
 
 	_, err = conn.writer.WriteString("\r\n")
 	if err != nil {

@@ -110,10 +110,10 @@ var (
 	}
 )
 
-func New(intt Intent) *Session {
+func New(intent Intent) *Session {
 	return &Session{
 		sock: &sock{
-			intt: int(intt),
+			intt: int(intent),
 			lock: true,
 		},
 	}
@@ -266,12 +266,6 @@ func (voice *Voice) event() {
 				return
 			}
 
-			if voice.Send == nil {
-				voice.Send = make(chan []byte)
-			}
-
-			voice.ready <- true
-
 		case 3:
 		case 4:
 
@@ -280,6 +274,12 @@ func (voice *Voice) event() {
 				voice.err <- err
 				return
 			}
+
+			if voice.Send == nil {
+				voice.Send = make(chan []byte)
+			}
+
+			voice.ready <- true
 
 			go voice.send()
 

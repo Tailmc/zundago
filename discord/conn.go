@@ -385,8 +385,8 @@ func (sock *sock) event() {
 			guild.ClientId = sock.bot.Id
 			Global.Guilds[guild.Id] = guild
 
-			for _, channel := range guild.Channels {
-				Global.Channels[channel.Id] = &channel
+			for idx := range guild.Channels {
+				Global.Channels[guild.Channels[idx].Id] = &guild.Channels[idx]
 			}
 
 			if sock.mem {
@@ -420,8 +420,8 @@ func (sock *sock) event() {
 			guild.ClientId = sock.bot.Id
 			Global.Guilds[guild.Id] = guild
 
-			for _, channel := range guild.Channels {
-				Global.Channels[channel.Id] = &channel
+			for idx := range guild.Channels {
+				Global.Channels[guild.Channels[idx].Id] = &guild.Channels[idx]
 			}
 
 		case guildDelete:
@@ -528,7 +528,7 @@ func (sock *sock) event() {
 			}
 
 			if voice, ok := Global.Voices[state.GuildID]; ok {
-				if state.Member.User.Id == sock.bot.Id {
+				if state.UserID == sock.bot.Id {
 					voice.state <- state
 				}
 			}
@@ -540,11 +540,16 @@ func (sock *sock) event() {
 				}
 
 				mp := make(map[string]bool)
+
+				if state.ChannelID == "" {
+					mp = map[string]bool{state.UserID: true}
+				}
+
 				nw := make([]VoiceState, 0)
 				for idx := range guild.VoiceStates {
 					state := guild.VoiceStates[len(guild.VoiceStates)-idx-1]
-					if !mp[state.Member.User.Id] {
-						mp[state.Member.User.Id] = true
+					if !mp[state.UserID] {
+						mp[state.UserID] = true
 						nw = append(nw, state)
 					}
 				}
@@ -593,14 +598,14 @@ func (sock *sock) event() {
 			}
 
 		case 9:
-			err := sock.ident(sock.intt)
+			err := sock.ident()
 			if err != nil {
 				sock.err <- err
 				return
 			}
 
 		case 10:
-			err := sock.ident(sock.intt)
+			err := sock.ident()
 			if err != nil {
 				sock.err <- err
 				return
@@ -636,10 +641,10 @@ func (sock *sock) event() {
 	}
 }
 
-func (sock *sock) ident(intt int) error {
+func (sock *sock) ident() error {
 	ident := map[string]interface{}{
 		"token":   sock.sec,
-		"intents": intt,
+		"intents": sock.intt,
 	}
 	props := map[string]string{
 		"os":      "linux",
